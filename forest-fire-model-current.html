@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forest fire — Power-law distribution</title>
+  <style>
+    :root { --bg:#07110d; --panel:#0d1b14; --line:#294334; --text:#e6f1e9; --muted:#94aa9c; --tree:#36c76b; --fire:#ff4d3d; --lightning:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at 18% 0%, #173624 0, var(--bg) 44%); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(1440px, calc(100% - 32px)); margin:0 auto; padding:28px 0 44px; }
+    header { display:flex; justify-content:center; align-items:end; gap:24px; margin-bottom:20px; text-align:center; }
+    h1 { margin:0; font-size:clamp(1.75rem,4vw,2.8rem); letter-spacing:-.05em; font-weight:700; }
+    header p { max-width:510px; margin:8px 0 0; color:var(--muted); line-height:1.5; }
+    .status { color:#c5e8ce; font-size:.86rem; white-space:nowrap; position:absolute; right:18px; top:18px; }
+    .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,1fr); gap:22px; align-items:start; }
+    .panel { background:color-mix(in srgb, var(--panel) 92%, transparent); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 18px 40px rgba(0,0,0,.16); }
+    h2 { margin:0 0 14px; font-size:1rem; font-weight:650; }
+    canvas { display:block; width:100%; aspect-ratio:1; image-rendering:pixelated; border-radius:7px; background:#000; }
+    .caption { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:.78rem; margin-top:12px; }
+    .dot { display:inline-block; width:.65em; height:.65em; border-radius:50%; margin:0 .3em 0 .75em; vertical-align:middle; }
+    .dot:first-child { margin-left:0; }.tree{background:var(--tree)}.fire{background:var(--fire)}.lightning{background:var(--lightning)}.empty{background:#000;border:1px solid #506055}
+    .controls { margin:0 0 22px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:16px; align-items:end; }
+    .control { padding:0; }
+    .control-label { display:flex; justify-content:space-between; gap:12px; margin-bottom:8px; font-size:.9rem; }
+    output { color:#b5e7c3; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    input[type=range] { width:100%; accent-color:var(--tree); }
+    .buttons { display:flex; gap:10px; }
+    button { appearance:none; color:var(--text); background:#173524; border:1px solid #376646; border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer; }
+    button:hover { background:#214b31; } button.primary { background:var(--tree); color:#06200e; border-color:var(--tree); font-weight:650; }
+    .chart-wrap { position:relative; }
+    #chart { aspect-ratio:1.18; background:transparent; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:16px; }
+    .stat { border-left:2px solid var(--line); padding-left:9px; color:var(--muted); font-size:.72rem; }
+    .stat b { display:block; color:var(--text); font-size:1.05rem; margin-top:2px; font-variant-numeric:tabular-nums; }
+    .explain { margin:16px 0 0; color:var(--muted); font-size:.78rem; line-height:1.5; }
+    @media (max-width:900px) { main { width:min(100% - 22px, 760px); padding-top:24px; } header { align-items:start; flex-direction:column; gap:7px; } .status { position:static; } .controls,.layout { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><h1>Forest Fire Model — Power Law</h1><p>Самоорганизованная критичность: размеры завершённых пожаров собираются в логарифмические интервалы.</p></div>
+      <div class="status" id="status" aria-live="polite">Пустая сетка готова</div>
+    </header>
+    <section class="panel controls">
+          <div class="control"><div class="control-label"><label for="growth">Вероятность размножения дерева</label><output id="growthValue"></output></div><input id="growth" type="range" min="0.0001" max="0.05" step="0.0001" value="0.004"></div>
+          <div class="control"><div class="control-label"><label for="lightning">Вероятность удара молнии за тик</label><output id="lightningValue"></output></div><input id="lightning" type="range" min="0.0001" max="0.1" step="0.0001" value="0.01"></div>
+          <div class="control"><div class="control-label"><label for="fps">Кадры в секунду</label><output id="fpsValue"></output></div><input id="fps" type="range" min="1" max="60" step="1" value="30"></div>
+      <div class="buttons"><button class="primary" id="toggle" type="button">Начать</button><button id="reset" type="button">Сброс</button></div>
+    </section>
+    <section class="layout">
+      <div class="panel"><h2>Лес</h2><canvas id="forest" aria-label="Сетка леса: пустые клетки, деревья, удары молнии и горящие клетки"></canvas><div class="caption"><span><i class="dot empty"></i>пусто <i class="dot tree"></i>дерево <i class="dot lightning"></i>молния <i class="dot fire"></i>пожар</span><span id="tickLabel">0 тиков</span></div></div>
+      <div class="panel chart-wrap"><h2>Log–Log распределение размеров пожаров</h2><canvas id="chart" aria-label="Log-log график логарифмически сгруппированных размеров пожаров"></canvas><div class="stats"><div class="stat">завершено<b id="completed">0</b></div><div class="stat">крупнейший пожар<b id="largest">—</b></div><div class="stat">деревьев сейчас<b id="trees">0%</b></div></div><p class="explain">Размеры объединены в интервалы 1–2, 2–4, 4–8 и далее. Ось X: 1–10&nbsp;000 деревьев; ось Y: нормированная частота 0,001–100&nbsp;000.</p></div>
+    </section>
+  </main>
+  <script>
+  (() => {
+    const forest = document.querySelector('#forest'), fctx = forest.getContext('2d');
+    const chart = document.querySelector('#chart'), cctx = chart.getContext('2d');
+    const els = Object.fromEntries(['growth','lightning','fps','toggle','reset','status','tickLabel','completed','largest','trees'].map(id=>[id,document.getElementById(id)]));
+    const vals = Object.fromEntries(['growth','lightning','fps'].map(id=>[id,document.getElementById(id+'Value')]));
+    let n=160, cells, owners, fires, counts, logBins, flashes, impactId=0, tick=0, running=false, accumulator=0, previous=performance.now(), lastChart=0;
+    function setup(resetData=true) { cells=new Uint8Array(n*n); owners=new Int32Array(n*n); fires=new Map(); flashes=new Map(); tick=0; lastChart=0; if(resetData) { counts=new Map(); logBins=new Map(); } drawForest(); drawChart(); updateStats(); }
+    function formatControls(){ vals.growth.textContent=(+els.growth.value*100).toFixed(2)+'% / клетку · тик'; vals.lightning.textContent=(+els.lightning.value*100).toFixed(4)+'% / тик'; vals.fps.textContent=els.fps.value+' FPS'; }
+    function startFire(index) { const id=tick*100000+index+1; cells[index]=2; owners[index]=id; fires.set(id,{front:[index],size:1}); }
+    function showImpact(index) { const id=++impactId; flashes.set(index,id); setTimeout(()=>{ if(flashes.get(index)===id) { flashes.delete(index); drawForest(); } },2000); }
+    function step(){
+      tick++;
+      const p=+els.growth.value, lightning=+els.lightning.value;
+      for(let i=0;i<cells.length;i++) if(cells[i]===0 && Math.random()<p) cells[i]=1;
+      if(Math.random()<lightning) { const hit=(Math.random()*cells.length)|0; showImpact(hit); if(cells[hit]===1) startFire(hit); }
+      const next=new Map(), completed=[];
+      for(const [id,fire] of fires) { const front=[]; for(const at of fire.front) { const x=at%n, y=(at/n)|0; const nbr=[x>0?at-1:-1,x<n-1?at+1:-1,y>0?at-n:-1,y<n-1?at+n:-1]; cells[at]=0; owners[at]=0; for(const j of nbr) if(j>=0 && cells[j]===1){ cells[j]=2; owners[j]=id; front.push(j); fire.size++; } }
+        if(front.length) next.set(id,{front,size:fire.size}); else { counts.set(fire.size,(counts.get(fire.size)||0)+1); const lower=2**Math.floor(Math.log2(fire.size)); logBins.set(lower,(logBins.get(lower)||0)+1); completed.push(fire.size); }
+      }
+      fires=next;
+      if(tick-lastChart>=15) { lastChart=tick; drawChart(); }
+      updateStats();
+      drawForest();
+    }
+    function fit(canvas,ctx){ const dpr=Math.min(devicePixelRatio||1,2), rect=canvas.getBoundingClientRect(), w=Math.max(1,Math.round(rect.width*dpr)), h=Math.max(1,Math.round(rect.height*dpr)); if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;} ctx.setTransform(dpr,0,0,dpr,0,0); return rect; }
+    function drawForest(){ const r=fit(forest,fctx), w=r.width, h=r.height, sx=w/n, sy=h/n; fctx.fillStyle='#000'; fctx.fillRect(0,0,w,h); for(let i=0;i<cells.length;i++){if(cells[i]){fctx.fillStyle=cells[i]===1?'#36c76b':'#ff3b30'; fctx.fillRect((i%n)*sx,((i/n)|0)*sy,Math.ceil(sx),Math.ceil(sy));}} fctx.fillStyle='#fff';for(const i of flashes.keys())fctx.fillRect((i%n)*sx,((i/n)|0)*sy,Math.ceil(sx),Math.ceil(sy)); }
+    function drawChart(){
+      const r=fit(chart,cctx), w=r.width, h=r.height, pad={l:64,r:16,t:15,b:42}, minX=1, maxX=10000, minY=.001, maxY=100000;
+      cctx.clearRect(0,0,w,h); cctx.strokeStyle='#294334'; cctx.lineWidth=1; cctx.strokeRect(pad.l,pad.t,w-pad.l-pad.r,h-pad.t-pad.b);
+      cctx.fillStyle='#94aa9c'; cctx.font='12px system-ui'; cctx.textAlign='center'; cctx.fillText('Размер пожара S (логарифмическая шкала)',(pad.l+w-pad.r)/2,h-10); cctx.save(); cctx.translate(15,(pad.t+h-pad.b)/2); cctx.rotate(-Math.PI/2); cctx.fillText('Нормированная частота P(S) (логарифмическая шкала)',0,0); cctx.restore();
+      const total=[...logBins.values()].reduce((sum,value)=>sum+value,0);
+      const data=total?[...logBins].map(([lower,number])=>({size:lower*Math.SQRT2,number:number/total/(lower)})).filter(d=>d.size>=minX && d.size<=maxX && d.number>=minY && d.number<=maxY):[];
+      const X=size=>pad.l+(Math.log10(size)-Math.log10(minX))/(Math.log10(maxX)-Math.log10(minX))*(w-pad.l-pad.r), Y=number=>h-pad.b-(Math.log10(number)-Math.log10(minY))/(Math.log10(maxY)-Math.log10(minY))*(h-pad.t-pad.b);
+      cctx.strokeStyle='#294334'; cctx.fillStyle='#94aa9c';
+      for(const value of [1,10,100,1000,10000]) { const x=X(value); cctx.beginPath(); cctx.moveTo(x,pad.t); cctx.lineTo(x,h-pad.b); cctx.stroke(); cctx.textAlign='center'; cctx.fillText(value.toLocaleString('ru-RU'),x,h-pad.b+18); }
+      for(const value of [.001,.01,.1,1,10,100,1000,10000,100000]) { const y=Y(value); cctx.beginPath(); cctx.moveTo(pad.l,y); cctx.lineTo(w-pad.r,y); cctx.stroke(); cctx.textAlign='right'; cctx.fillText(value<.01?value.toFixed(3):value.toLocaleString('ru-RU'),pad.l-7,y+4); }
+      if(!data.length) { cctx.textAlign='center'; cctx.fillText('Ожидание завершённых пожаров…',w/2,h/2); return; }
+      cctx.fillStyle='#36c76b'; for(const d of data) { cctx.beginPath(); cctx.arc(X(d.size),Y(d.number),4,0,Math.PI*2); cctx.fill(); }
+    }
+    function updateStats(){ const total=[...counts].reduce((a,[s,num])=>a+num,0), largest=counts.size?Math.max(...counts.keys()):0, trees=cells.reduce((a,v)=>a+(v===1),0); els.tickLabel.textContent=tick.toLocaleString('ru-RU')+' тиков';els.completed.textContent=total.toLocaleString('ru-RU');els.largest.textContent=largest?largest.toLocaleString('ru-RU'):'—';els.trees.textContent=Math.round(trees/cells.length*100)+'%'; }
+    function frame(now){ const dt=now-previous;previous=now; if(running){accumulator+=dt;const interval=1000/+els.fps.value;let safety=0;while(accumulator>=interval&&safety++<8){step();accumulator-=interval;}}requestAnimationFrame(frame);}
+    ['growth','lightning','fps'].forEach(id=>els[id].addEventListener('input',formatControls)); els.toggle.addEventListener('click',()=>{running=!running;els.toggle.textContent=running?'Пауза':'Продолжить';els.status.textContent=running?'Модель работает':'Модель на паузе';});els.reset.addEventListener('click',()=>{running=false;els.toggle.textContent='Начать';els.status.textContent='Пустая сетка готова';setup(true);});new ResizeObserver(()=>{drawForest();drawChart();}).observe(document.querySelector('.layout')); formatControls();setup(true);requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>
